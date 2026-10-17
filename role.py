@@ -77,6 +77,8 @@ async def execute(data: dict, ctx) -> dict:
         return {"decision": "BLOCKED", "reason": "ci.log.fetch missing or invalid 'log' field"}
     if ci_result.get("logsUnavailable") is True:
         return {"decision": "BLOCKED", "reason": "ci.log.fetch reports logsUnavailable=True"}
+    if not ci_result["log"].strip():
+        return {"decision": "BLOCKED", "reason": "ci.log.fetch 'log' is empty or whitespace"}
 
     if not isinstance(pr_diff_result, dict):
         return {"decision": "BLOCKED", "reason": "git.pr.diff returned non-dict"}

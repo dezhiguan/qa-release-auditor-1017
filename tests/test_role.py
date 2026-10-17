@@ -143,7 +143,7 @@ async def test_execute_ci_log_empty_blocked():
     result = await execute(data, ctx)
     
     assert result["decision"] == "BLOCKED"
-    assert "ci.log.fetch missing or invalid 'log' field" in result["reason"] or "empty or whitespace" in result["reason"]
+    assert "ci.log.fetch 'log' is empty or whitespace" in result["reason"]
 
 
 @pytest.mark.asyncio
