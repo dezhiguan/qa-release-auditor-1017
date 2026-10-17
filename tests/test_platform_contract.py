@@ -31,6 +31,9 @@ class Prompt:
 
 
 class Tools:
+    def __init__(self, overrides=None):
+        self.overrides = overrides or {}
+
     async def call(self, name, **kwargs):
         values = {
             "ci.log.fetch": {"log": "CI completed successfully; tests passed", "logsUnavailable": False},
@@ -43,7 +46,7 @@ class Tools:
         }
         if name not in TOOLS:
             raise AssertionError(f"Unapproved tool call: {name}")
-        return values[name]
+        return self.overrides.get(name, values[name])
 
 
 class Llm:
@@ -55,8 +58,8 @@ class Llm:
 
 
 class Context:
-    def __init__(self, response, child_result=None):
-        self.tools = Tools()
+    def __init__(self, response, child_result=None, tool_overrides=None):
+        self.tools = Tools(tool_overrides)
         self.llm = Llm(response)
         self.manifest = SimpleNamespace(spec=SimpleNamespace(delegates=DELEGATES))
         self.child_result = child_result
@@ -83,5 +86,17 @@ def test_child_blocked_remains_blocked_when_model_says_pass():
     if not DELEGATES:
         pytest.skip("Supervisor contract only")
     context = Context('{"decision":"PASS"}', {"decision": "BLOCKED", "reason": "Child found missing evidence"})
+    result = asyncio.run(execute(_normal_input(), context))
+    assert result["decision"] == "BLOCKED"
+
+
+@pytest.mark.parametrize("tool,invalid", [
+    ("ci.log.fetch", {"log": "", "logsUnavailable": True}),
+    ("git.pr.diff", {"diff": "", "number": 1}),
+])
+def test_missing_tool_evidence_cannot_become_pass(tool, invalid):
+    if tool not in TOOLS:
+        pytest.skip("Evidence tool is not selected")
+    context = Context('{"decision":"PASS"}', tool_overrides={tool: invalid})
     result = asyncio.run(execute(_normal_input(), context))
     assert result["decision"] == "BLOCKED"
