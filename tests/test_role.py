@@ -29,10 +29,10 @@ async def test_execute_normal_flow():
         {"diff": "diff --git a/file.py b/file.py", "number": 1}  # git.pr.diff
     ])
     
-    # Mock delegate responses
+    # Mock delegate responses — return full encapsulated dicts
     ctx.delegate = AsyncMock(side_effect=[
-        {"result": "DevOps review: CI log confirms build success", "agent": "qa-devops-investigator-1017"},
-        {"result": "Policy review: PR diff contains no PII", "agent": "qa-policy-advisor-1017"}
+        {"result": "DevOps review: CI log confirms build success"},
+        {"result": "Policy review: PR diff contains no PII"}
     ])
     
     # Input data
@@ -80,21 +80,28 @@ async def test_execute_missing_repo():
 
 
 @pytest.mark.asyncio
-async def test_execute_tool_failure():
+async def test_execute_child_blocked_remains_blocked_when_model_says_pass():
     ctx = MagicMock()
     ctx.manifest.spec.delegates = ["qa-devops-investigator-1017", "qa-policy-advisor-1017"]
     
-    ctx.prompt = AsyncMock()
-    ctx.llm.chat = AsyncMock()
+    mock_prompt = MagicMock()
+    mock_prompt.compile = MagicMock(return_value="Compiled prompt")
+    ctx.prompt = AsyncMock(return_value=mock_prompt)
     
-    # Simulate ci.log.fetch raises exception
+    ctx.llm.chat = AsyncMock(return_value='{"decision": "PASS", "reason": "All looks fine"}')
+    
+    # Simulate devflow.job.read succeeds
     ctx.tools.call = AsyncMock(side_effect=[
         [{"id": "DF-0007", "status": "completed"}],
-        Exception("network timeout"),
+        {"log": "build passed"},
         {"diff": "...", "number": 1}
     ])
     
-    ctx.delegate = AsyncMock()
+    # First delegate returns BLOCKED result (as full dict with decision)
+    ctx.delegate = AsyncMock(side_effect=[
+        {"result": {"decision": "BLOCKED", "reason": "missing artifact"}},
+        {"result": "Policy review OK"}
+    ])
     
     data = {
         "text": "请对仓库 qa-release-checker-1017 的 CI runId 39010072606、PR #1、任务 DF-0007 执行核对主分支构建与差异。"
@@ -103,4 +110,4 @@ async def test_execute_tool_failure():
     result = await execute(data, ctx)
     
     assert result["decision"] == "BLOCKED"
-    assert "ci.log.fetch call failed" in result["reason"]
+    assert "Delegate qa-devops-investigator-1017 returned BLOCKED or empty result" in result["reason"]
