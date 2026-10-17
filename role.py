@@ -71,11 +71,19 @@ async def execute(data: dict, ctx) -> dict:
     if len(job_result) == 0:
         return {"decision": "BLOCKED", "reason": "devflow.job.read returned empty list"}
 
-    if not isinstance(ci_result, dict) or "log" not in ci_result:
-        return {"decision": "BLOCKED", "reason": "ci.log.fetch missing 'log' field"}
+    if not isinstance(ci_result, dict):
+        return {"decision": "BLOCKED", "reason": "ci.log.fetch returned non-dict"}
+    if "log" not in ci_result or not isinstance(ci_result["log"], str):
+        return {"decision": "BLOCKED", "reason": "ci.log.fetch missing or invalid 'log' field"}
+    if ci_result.get("logsUnavailable") is True:
+        return {"decision": "BLOCKED", "reason": "ci.log.fetch reports logsUnavailable=True"}
 
-    if not isinstance(pr_diff_result, dict) or "diff" not in pr_diff_result or "number" not in pr_diff_result:
-        return {"decision": "BLOCKED", "reason": "git.pr.diff missing 'diff' or 'number' field"}
+    if not isinstance(pr_diff_result, dict):
+        return {"decision": "BLOCKED", "reason": "git.pr.diff returned non-dict"}
+    if "diff" not in pr_diff_result or not isinstance(pr_diff_result["diff"], str) or "number" not in pr_diff_result:
+        return {"decision": "BLOCKED", "reason": "git.pr.diff missing or invalid 'diff' or 'number' field"}
+    if not pr_diff_result["diff"].strip():
+        return {"decision": "BLOCKED", "reason": "git.pr.diff 'diff' is empty or whitespace"}
 
     # Delegate to exactly two sub-agents
     sub_results = []
@@ -85,9 +93,12 @@ async def execute(data: dict, ctx) -> dict:
             delegate_res = await ctx.delegate(name, delegate_input)
             if not isinstance(delegate_res, dict) or "result" not in delegate_res:
                 return {"decision": "BLOCKED", "reason": f"Delegate {name} returned malformed response"}
-            if delegate_res["result"] is None or delegate_res["result"] == "" or (isinstance(delegate_res["result"], dict) and delegate_res["result"].get("decision") == "BLOCKED"):
-                return {"decision": "BLOCKED", "reason": f"Delegate {name} returned BLOCKED or empty result"}
-            sub_results.append({"agent": name, "result": delegate_res["result"]})
+            result_val = delegate_res["result"]
+            if result_val is None or result_val == "":
+                return {"decision": "BLOCKED", "reason": f"Delegate {name} returned empty result"}
+            if isinstance(result_val, dict) and result_val.get("decision") == "BLOCKED":
+                return {"decision": "BLOCKED", "reason": f"Delegate {name} returned BLOCKED decision"}
+            sub_results.append({"agent": name, "result": result_val})
         except Exception as e:
             return {"decision": "BLOCKED", "reason": f"Delegate {name} invocation failed: {str(e)}"}
 

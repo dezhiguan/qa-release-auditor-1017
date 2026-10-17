@@ -93,7 +93,7 @@ async def test_execute_child_blocked_remains_blocked_when_model_says_pass():
     # Simulate devflow.job.read succeeds
     ctx.tools.call = AsyncMock(side_effect=[
         [{"id": "DF-0007", "status": "completed"}],
-        {"log": "build passed"},
+        {"log": "build passed", "logsUnavailable": False},
         {"diff": "...", "number": 1}
     ])
     
@@ -110,4 +110,70 @@ async def test_execute_child_blocked_remains_blocked_when_model_says_pass():
     result = await execute(data, ctx)
     
     assert result["decision"] == "BLOCKED"
-    assert "Delegate qa-devops-investigator-1017 returned BLOCKED or empty result" in result["reason"]
+    assert "Delegate qa-devops-investigator-1017 returned BLOCKED decision" in result["reason"]
+
+
+@pytest.mark.asyncio
+async def test_execute_ci_log_empty_blocked():
+    ctx = MagicMock()
+    ctx.manifest.spec.delegates = ["qa-devops-investigator-1017", "qa-policy-advisor-1017"]
+    
+    mock_prompt = MagicMock()
+    mock_prompt.compile = MagicMock(return_value="Compiled prompt")
+    ctx.prompt = AsyncMock(return_value=mock_prompt)
+    
+    ctx.llm.chat = AsyncMock(return_value='{"decision": "PASS"}')
+    
+    # ci.log.fetch returns empty log
+    ctx.tools.call = AsyncMock(side_effect=[
+        [{"id": "DF-0007", "status": "completed"}],
+        {"log": "", "logsUnavailable": False},
+        {"diff": "...", "number": 1}
+    ])
+    
+    ctx.delegate = AsyncMock(side_effect=[
+        {"result": "DevOps review OK"},
+        {"result": "Policy review OK"}
+    ])
+    
+    data = {
+        "text": "请对仓库 qa-release-checker-1017 的 CI runId 39010072606、PR #1、任务 DF-0007 执行核对主分支构建与差异。"
+    }
+    
+    result = await execute(data, ctx)
+    
+    assert result["decision"] == "BLOCKED"
+    assert "ci.log.fetch missing or invalid 'log' field" in result["reason"] or "empty or whitespace" in result["reason"]
+
+
+@pytest.mark.asyncio
+async def test_execute_pr_diff_empty_blocked():
+    ctx = MagicMock()
+    ctx.manifest.spec.delegates = ["qa-devops-investigator-1017", "qa-policy-advisor-1017"]
+    
+    mock_prompt = MagicMock()
+    mock_prompt.compile = MagicMock(return_value="Compiled prompt")
+    ctx.prompt = AsyncMock(return_value=mock_prompt)
+    
+    ctx.llm.chat = AsyncMock(return_value='{"decision": "PASS"}')
+    
+    # git.pr.diff returns empty diff
+    ctx.tools.call = AsyncMock(side_effect=[
+        [{"id": "DF-0007", "status": "completed"}],
+        {"log": "build passed", "logsUnavailable": False},
+        {"diff": "", "number": 1}
+    ])
+    
+    ctx.delegate = AsyncMock(side_effect=[
+        {"result": "DevOps review OK"},
+        {"result": "Policy review OK"}
+    ])
+    
+    data = {
+        "text": "请对仓库 qa-release-checker-1017 的 CI runId 39010072606、PR #1、任务 DF-0007 执行核对主分支构建与差异。"
+    }
+    
+    result = await execute(data, ctx)
+    
+    assert result["decision"] == "BLOCKED"
+    assert "git.pr.diff 'diff' is empty or whitespace" in result["reason"]
